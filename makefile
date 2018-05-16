@@ -1,6 +1,6 @@
 
 all:
-	g++-7 ext2gen.cpp
+	g++-7 *.cpp */*.cpp -I utils
 
 test:
 	dumpe2fs hdd.ext2
