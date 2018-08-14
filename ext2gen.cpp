@@ -110,6 +110,26 @@ struct __attribute__((__packed__)) SuperblockEx : public Superblock {
     }
 };
 
+void readFs(std::string &location) {
+    Superblock super;
+
+    FILE * pFile;
+    pFile = fopen(location.c_str(), "r+");
+
+    if (pFile == NULL) {
+        std::cout << "Couldn't open " << location << ". R u root?" << std::endl;
+        return;
+    }
+
+    fseek(pFile, 1024, SEEK_SET);
+    fread(&super, 1, sizeof(super), pFile);
+    fclose(pFile);
+
+    std::cout << "Reading: " << location << std::endl;
+    std::cout << "====================================" << std::endl;
+    std::cout << super;
+}
+
 int main (int argc, char const *argv[]) {
     SuperblockEx super;
 
@@ -121,6 +141,15 @@ int main (int argc, char const *argv[]) {
     fseek(pFile, 1024, SEEK_SET);
     fwrite(&super, 1, sizeof(super), pFile);
     fclose(pFile);
+
+    std::string ext4("/dev/sda2");
+    readFs(ext4);
+
+    std::string test2("hdd2.ext2");
+    readFs(test2);
+
+    std::string test("hdd.ext2");
+    readFs(test);
 
     //util::hexdump(abc, sizeof(abc));
     return 0;
