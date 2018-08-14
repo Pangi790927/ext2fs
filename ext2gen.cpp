@@ -63,7 +63,7 @@ struct __attribute__((__packed__)) Superblock {
 };
 
 struct __attribute__((__packed__)) SuperblockEx : public Superblock {
-    uint32_t first_unreserved_ino = 3;
+    uint32_t first_unreserved_ino = 11;
     uint16_t ino_size = 128;
     uint16_t group_ownership = 0;
     uint32_t opt_features = 0;
@@ -73,8 +73,8 @@ struct __attribute__((__packed__)) SuperblockEx : public Superblock {
     char vol_name[16] = "Volume name";
     char last_mounted_path[64] = "/";
     uint32_t compr_alg = 0;
-    uint8_t prealoc_blocks_file = 1;
-    uint8_t prealoc_blocks_dir = 1;
+    uint8_t prealoc_blocks_file = 0;
+    uint8_t prealoc_blocks_dir = 0;
     uint16_t empty_1 = 0;
     char journal_id[16] = "aaaaaaaaaaaa";
     uint32_t journal_inode = 0;
@@ -87,7 +87,6 @@ struct __attribute__((__packed__)) SuperblockEx : public Superblock {
         operator << (stream, static_cast<const Superblock&>(arg));
 
         stream << std::endl << "\t### EXTENDED ###" << std::endl;
-        stream << "inodes:                   " << arg.inodes << std::endl;
         stream << "first_unreserved_ino:     " << arg.first_unreserved_ino << std::endl;
         stream << "ino_size:                 " << arg.ino_size << std::endl;
         stream << "group_ownership:          " << arg.group_ownership << std::endl;
@@ -111,7 +110,7 @@ struct __attribute__((__packed__)) SuperblockEx : public Superblock {
 };
 
 void readFs(std::string &location) {
-    Superblock super;
+    SuperblockEx super;
 
     FILE * pFile;
     pFile = fopen(location.c_str(), "r+");
@@ -133,17 +132,11 @@ void readFs(std::string &location) {
 int main (int argc, char const *argv[]) {
     SuperblockEx super;
 
-    std::cout << sizeof(SuperblockEx) << std::endl;
-    std::cout << super << std::endl;
-
     FILE * pFile;
     pFile = fopen("hdd.ext2" , "r+");
     fseek(pFile, 1024, SEEK_SET);
     fwrite(&super, 1, sizeof(super), pFile);
     fclose(pFile);
-
-    std::string ext4("/dev/sda2");
-    readFs(ext4);
 
     std::string test2("hdd2.ext2");
     readFs(test2);
