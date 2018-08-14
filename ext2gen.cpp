@@ -3,29 +3,29 @@
 #include "hexdump.h"
 
 struct __attribute__((__packed__)) Superblock {
-    uint32_t inodes = 1000;
-    uint32_t blocks = 65536;    // no of blocks
-    uint32_t rblocks = 0;        //
-    uint32_t un_blocks = 65536;    //
-    uint32_t un_inodes = 1000;    // unallocated indoes
-    uint32_t first_block = 1;    //
-    uint32_t block_size = 0;    //
-    uint32_t fragment_size = 0; //
-    uint32_t blocks_per_group = 1;
-    uint32_t fragments_per_group = 1;
-    uint32_t inodes_per_group = 1;
+    uint32_t inodes = 8192;
+    uint32_t blocks = 32768;        // no of blocks
+    uint32_t rblocks = 0;           //
+    uint32_t un_blocks = 32768;     //
+    uint32_t un_inodes = 8192;      // unallocated indoes
+    uint32_t first_block = 0;       //
+    uint32_t block_size = 0;        //
+    uint32_t fragment_size = 0;     //
+    uint32_t blocks_per_group = 32768;
+    uint32_t fragments_per_group = 32768;
+    uint32_t inodes_per_group = 8192;
     uint32_t last_mount_time = 1526484613;
     uint32_t last_written_time = 1526484613;
-    uint16_t mount_count = 2;
-    uint16_t max_mount_count = 10;
+    uint16_t mount_count = 11;
+    uint16_t max_mount_count = 65535;
     uint16_t ext2_signature = 0xef53;
-    uint16_t fs_state = 1;        // no errors
-    uint16_t fs_resolution = 1;    // continue
-    uint16_t version_minor = 1;
+    uint16_t fs_state = 1;          // no errors
+    uint16_t fs_resolution = 1;     // continue
+    uint16_t version_minor = 0;
     uint32_t last_consistency_time = 1526484613;
-    uint32_t int_consistency_time = 100000;
+    uint32_t int_consistency_time = 0;
     uint32_t os_creator_type = 4;
-    uint32_t version_major = 0;
+    uint32_t version_major = 1;
     uint16_t reserved_user_id = 0;
     uint16_t reserved_group_id = 0;
 
@@ -62,9 +62,58 @@ struct __attribute__((__packed__)) Superblock {
     }
 };
 
-int main (int argc, char const *argv[]) {
-    Superblock super;
+struct __attribute__((__packed__)) SuperblockEx : public Superblock {
+    uint32_t first_unreserved_ino = 3;
+    uint16_t ino_size = 128;
+    uint16_t group_ownership = 0;
+    uint32_t opt_features = 0;
+    uint32_t req_features = 0;
+    uint32_t ro_features = 0;
+    char fsid[16] = "ffffffffffff";
+    char vol_name[16] = "Volume name";
+    char last_mounted_path[64] = "/";
+    uint32_t compr_alg = 0;
+    uint8_t prealoc_blocks_file = 1;
+    uint8_t prealoc_blocks_dir = 1;
+    uint16_t empty_1 = 0;
+    char journal_id[16] = "aaaaaaaaaaaa";
+    uint32_t journal_inode = 0;
+    uint32_t journal_device = 0;
+    uint32_t head_orphan_inode = 0;
 
+    friend std::ostream& operator << (std::ostream& stream,
+            const SuperblockEx& arg)
+    {
+        operator << (stream, static_cast<const Superblock&>(arg));
+
+        stream << std::endl << "\t### EXTENDED ###" << std::endl;
+        stream << "inodes:                   " << arg.inodes << std::endl;
+        stream << "first_unreserved_ino:     " << arg.first_unreserved_ino << std::endl;
+        stream << "ino_size:                 " << arg.ino_size << std::endl;
+        stream << "group_ownership:          " << arg.group_ownership << std::endl;
+        stream << "opt_features:             " << arg.opt_features << std::endl;
+        stream << "req_features:             " << arg.req_features << std::endl;
+        stream << "ro_features:              " << arg.ro_features << std::endl;
+        stream << "fsid:                     " << arg.fsid << std::endl;
+        stream << "vol_name:                 " << arg.vol_name << std::endl;
+        stream << "last_mounted_path:        " << arg.last_mounted_path << std::endl;
+        stream << "compr_alg:                " << arg.compr_alg << std::endl;
+        stream << "prealoc_blocks_file:      " << (int)arg.prealoc_blocks_file << std::endl;
+        stream << "prealoc_blocks_dir:       " << (int)arg.prealoc_blocks_dir << std::endl;
+        stream << "empty_1:                  " << arg.empty_1 << std::endl;
+        stream << "journal_id:               " << arg.journal_id << std::endl;
+        stream << "journal_inode:            " << arg.journal_inode << std::endl;
+        stream << "journal_device:           " << arg.journal_device << std::endl;
+        stream << "head_orphan_inode:        " << arg.head_orphan_inode << std::endl;
+
+        return stream;
+    }
+};
+
+int main (int argc, char const *argv[]) {
+    SuperblockEx super;
+
+    std::cout << sizeof(SuperblockEx) << std::endl;
     std::cout << super << std::endl;
 
     FILE * pFile;
