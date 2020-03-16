@@ -1,0 +1,126 @@
+#include <iostream>
+#include <set>
+#include <cstdlib>
+#include "interval_map.h"
+
+using SetType = std::set<IntervalMap<std::string>::IntEnd>;
+using VecType = std::vector<std::pair<int, int>>;
+
+SetType intersect(int i, int j, int k, int o)
+{
+	SetType res {
+		{i, '+'},
+		{j, '-'},
+		{k, '+'},
+		{o, '-'},
+	};
+	for (int a = i; a < j; a++) {
+		for (int b = k; b < o; b++) {
+			if (a == b) {
+				res.clear();
+				res.insert({std::min(i, k), '+'});
+				res.insert({std::max(j, o), '-'});
+			}
+		}
+	}
+	return res;
+}
+
+SetType intersect(VecType v) {
+	SetType res;
+	int arr[51]{0};
+	for (auto &&[a, b] : v) {
+		if (a < b) {
+			for (int i = a; i < b - 1; i++) {
+				arr[i] = 1;
+			}
+			if (arr[b - 1] != 1)
+				arr[b - 1] = 2;
+		}
+	}
+	int prev = 0;
+	for (int i = 0; i < sizeof(arr) / sizeof(arr[0]); i++) {
+		if ((prev == 0 || prev == 2) && arr[i] != 0)
+			res.insert({i, '+'});
+		if (arr[i] == 2)
+			res.insert({i + 1, '-'});
+		prev = arr[i];
+	}
+	return res;
+}
+
+int main(int argc, char const *argv[])
+{
+	std::function<void(std::string& keep, const std::string& oth)> merger =
+			[](std::string& keep, const std::string& oth)
+	{
+		keep = oth;
+	};
+
+	auto print_diff = [](auto vec, auto &set_own, auto &set_brute) {
+		if (set_own != set_brute) {
+			std::sort(vec.begin(), vec.end());
+			printf("orig: \n");
+			for (auto &&[a, b] : vec)
+				printf("(%d, %d) ", a, b);
+			printf("\n");
+			printf("own: \n");
+			for (auto &&k : set_own)
+				printf("(%d, %c) ", k.index, k.dir);
+			printf("\n");
+			printf("bru: \n");
+			for (auto &&k : set_brute)
+				printf("(%d, %c) ", k.index, k.dir);
+			printf("\n");
+			printf("=====================\n");
+		}
+	};
+
+	IntervalMap<std::string> intervalmap(merger);
+	auto print_fn = [](std::string& obj){
+		printf("%s", obj.c_str());
+	};
+	for (int i = 0; i < 7; i++) {
+		for (int j = 0; j < 7; j++) {
+			for (int k = 0; k < 7; k++) {
+				for (int o = 0; o < 7; o++) {
+					if (i >= j || k >= o)
+						continue;
+					SetType res_brute = intersect(i, j, k, o);
+					SetType res_own;
+
+					intervalmap.clear();
+					intervalmap.insert(i, j, "a");
+					intervalmap.insert(k, o, "b");
+					for (auto&& [k, v] : intervalmap)
+						res_own.insert(k);
+					print_diff(VecType{{i, j}, {k, o}}, res_own, res_brute);
+				}
+			}
+		}
+	}
+
+	for (int i = 0; i < 100000; i++) {
+		VecType vev;
+		IntervalMap<std::string> intervalmap(merger);
+
+		for (int j = 0; j < 13; j++) {
+			int a = rand() % 50;
+			int b = rand() % 50;
+			if (a >= b)
+				continue;
+			vev.push_back({a, b});
+		}
+		SetType res_brute = intersect(vev);
+
+		for (auto&& [a, b] : vev)
+			intervalmap.insert(a, b, "=");
+		SetType res_own;
+		for (auto&& [k, v] : intervalmap)
+			res_own.insert(k);
+
+		print_diff(vev, res_own, res_brute);
+	}
+	
+	return 0;
+}

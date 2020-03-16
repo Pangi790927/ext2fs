@@ -1,149 +1,230 @@
 #include <iostream>
+#include <fstream>
 #include <cstdio>
+#include <zlib.h>
 #include "hexdump.h"
+#include "mbr.h"
+#include "gpt.h"
+#include "ext2.h"
+#include "to_str.h"
+#include "crc32.h"
+#include "dev_layout.h"
+#include "dev.h"
+#include "file.h"
+#include "ext2dev.h"
 
-struct __attribute__((__packed__)) Superblock {
-    uint32_t inodes = 8192;
-    uint32_t blocks = 32768;        // no of blocks
-    uint32_t rblocks = 0;           //
-    uint32_t un_blocks = 32768;     //
-    uint32_t un_inodes = 8192;      // unallocated indoes
-    uint32_t first_block = 0;       //
-    uint32_t block_size = 0;        //
-    uint32_t fragment_size = 0;     //
-    uint32_t blocks_per_group = 32768;
-    uint32_t fragments_per_group = 32768;
-    uint32_t inodes_per_group = 8192;
-    uint32_t last_mount_time = 1526484613;
-    uint32_t last_written_time = 1526484613;
-    uint16_t mount_count = 11;
-    uint16_t max_mount_count = 65535;
-    uint16_t ext2_signature = 0xef53;
-    uint16_t fs_state = 1;          // no errors
-    uint16_t fs_resolution = 1;     // continue
-    uint16_t version_minor = 0;
-    uint32_t last_consistency_time = 1526484613;
-    uint32_t int_consistency_time = 0;
-    uint32_t os_creator_type = 4;
-    uint32_t version_major = 1;
-    uint16_t reserved_user_id = 0;
-    uint16_t reserved_group_id = 0;
+#define PART_SIZE	((int)sizeof(gpt_part_t))
 
-    friend std::ostream& operator << (std::ostream& stream,
-            const Superblock& arg)
-    {
-        stream << "inodes:                   " << arg.inodes << std::endl;
-        stream << "blocks:                   " << arg.blocks << std::endl;
-        stream << "rblocks:                  " << arg.rblocks << std::endl;
-        stream << "un_blocks:                " << arg.un_blocks << std::endl;
-        stream << "un_inodes:                " << arg.un_inodes << std::endl;
-        stream << "first_block:              " << arg.first_block << std::endl;
-        stream << "block_size:               " << arg.block_size << std::endl;
-        stream << "fragment_size:            " << arg.fragment_size << std::endl;
-        stream << "blocks_per_group:         " << arg.blocks_per_group << std::endl;
-        stream << "fragments_per_group:      " << arg.fragments_per_group << std::endl;
-        stream << "inodes_per_group:         " << arg.inodes_per_group << std::endl;
-        stream << "last_mount_time:          " << arg.last_mount_time << std::endl;
-        stream << "last_written_time:        " << arg.last_written_time << std::endl;
-        stream << "mount_count:              " << arg.mount_count << std::endl;
-        stream << "max_mount_count:          " << arg.max_mount_count << std::endl;
-        stream << "ext2_signature:           " << arg.ext2_signature << std::endl;
-        stream << "fs_state:                 " << arg.fs_state << std::endl;
-        stream << "fs_resolution:            " << arg.fs_resolution << std::endl;
-        stream << "version_minor:            " << arg.version_minor << std::endl;
-        stream << "last_consistency_time:    " << arg.last_consistency_time << std::endl;
-        stream << "int_consistency_time:     " << arg.int_consistency_time << std::endl;
-        stream << "os_creator_type:          " << arg.os_creator_type << std::endl;
-        stream << "version_major:            " << arg.version_major << std::endl;
-        stream << "reserved_user_id:         " << arg.reserved_user_id << std::endl;
-        stream << "reserved_group_id:        " << arg.reserved_group_id << std::endl;
-        
-        return stream;
-    }
-};
+/* just a sector */
+#define MBR_SIZE	(SECTOR_SZ)
 
-struct __attribute__((__packed__)) SuperblockEx : public Superblock {
-    uint32_t first_unreserved_ino = 11;
-    uint16_t ino_size = 128;
-    uint16_t group_ownership = 0;
-    uint32_t opt_features = 0;
-    uint32_t req_features = 0;
-    uint32_t ro_features = 0;
-    char fsid[16] = "ffffffffffff";
-    char vol_name[16] = "Volume name";
-    char last_mounted_path[64] = "/";
-    uint32_t compr_alg = 0;
-    uint8_t prealoc_blocks_file = 0;
-    uint8_t prealoc_blocks_dir = 0;
-    uint16_t empty_1 = 0;
-    char journal_id[16] = "aaaaaaaaaaaa";
-    uint32_t journal_inode = 0;
-    uint32_t journal_device = 0;
-    uint32_t head_orphan_inode = 0;
+/* header + partitions */
+#define GPT_SIZE	(SECTOR_SZ + PART_SIZE * 128)
 
-    friend std::ostream& operator << (std::ostream& stream,
-            const SuperblockEx& arg)
-    {
-        operator << (stream, static_cast<const Superblock&>(arg));
+/* 1024 offset, 1 superblock, group table, 1 blk_bitmap, 1 inode bitmap,
+	1 blk for 8 inodes, 8 blks for 8 data blks */
+#define MIN_FS_SIZE (1024 + (1 + 1 + 1 + 1 + 9) * BLK_SIZE)
+#define TOT_SIZE	(MBR_SIZE + GPT_SIZE * 2 + MIN_FS_SIZE)
 
-        stream << std::endl << "\t### EXTENDED ###" << std::endl;
-        stream << "first_unreserved_ino:     " << arg.first_unreserved_ino << std::endl;
-        stream << "ino_size:                 " << arg.ino_size << std::endl;
-        stream << "group_ownership:          " << arg.group_ownership << std::endl;
-        stream << "opt_features:             " << arg.opt_features << std::endl;
-        stream << "req_features:             " << arg.req_features << std::endl;
-        stream << "ro_features:              " << arg.ro_features << std::endl;
-        stream << "fsid:                     " << arg.fsid << std::endl;
-        stream << "vol_name:                 " << arg.vol_name << std::endl;
-        stream << "last_mounted_path:        " << arg.last_mounted_path << std::endl;
-        stream << "compr_alg:                " << arg.compr_alg << std::endl;
-        stream << "prealoc_blocks_file:      " << (int)arg.prealoc_blocks_file << std::endl;
-        stream << "prealoc_blocks_dir:       " << (int)arg.prealoc_blocks_dir << std::endl;
-        stream << "empty_1:                  " << arg.empty_1 << std::endl;
-        stream << "journal_id:               " << arg.journal_id << std::endl;
-        stream << "journal_inode:            " << arg.journal_inode << std::endl;
-        stream << "journal_device:           " << arg.journal_device << std::endl;
-        stream << "head_orphan_inode:        " << arg.head_orphan_inode << std::endl;
+void install_mbr(Dev &dev, DevLayout &layout) {
+	auto mbr_code = read_file(layout.path("main_boot"));
+	if (mbr_code.empty())
+		mbr_code.resize(SECTOR_SZ);
 
-        return stream;
-    }
-};
+	mbr_hdr_t &mbr = *(mbr_hdr_t *)dev.get_sect(0);
+	mbr = *(mbr_hdr_t *)(&mbr_code[0]);
 
-void readFs(std::string &location) {
-    SuperblockEx super;
+	mbr.boot_sig = 0xAA55;
+	mbr.disk_sig = 0;
+	mbr.zero2 = 0;
 
-    FILE * pFile;
-    pFile = fopen(location.c_str(), "r+");
+	mbr.part1 = {0};
+	mbr.part1.sys_id = 0xEE;
+	mbr.part1.lo_start = 1;
+	mbr.part1.lo_len = dev.sect_cnt() - 1ULL > 0xFFFFFFFFULL ? 0xFFFFFFFFULL :
+			dev.sect_cnt() - 1ULL;
+	mbr.part2 = {0};
+	mbr.part3 = {0};
+	mbr.part4 = {0};
 
-    if (pFile == NULL) {
-        std::cout << "Couldn't open " << location << ". R u root?" << std::endl;
-        return;
-    }
-
-    fseek(pFile, 1024, SEEK_SET);
-    fread(&super, 1, sizeof(super), pFile);
-    fclose(pFile);
-
-    std::cout << "Reading: " << location << std::endl;
-    std::cout << "====================================" << std::endl;
-    std::cout << super;
+	printf("mbr: %s\n", mbr_str(mbr).c_str());
 }
 
-int main (int argc, char const *argv[]) {
-    SuperblockEx super;
+void install_gpt(Dev &dev, DevLayout &layout) {
+	for (int i = 0; i < 128; i++) {
+		memset(dev.get_sect(2 + i), 0, PART_SIZE);
+	}
+	gpt_hdr_t &gpt = *(gpt_hdr_t *)dev.get_sect(1);
+	memset(&gpt, 0, sizeof(gpt));
 
-    FILE * pFile;
-    pFile = fopen("hdd.ext2" , "r+");
-    fseek(pFile, 1024, SEEK_SET);
-    fwrite(&super, 1, sizeof(super), pFile);
-    fclose(pFile);
+	memcpy(gpt.sig, "EFI PART", 8);
+	gpt.rev = 0x00010000;
+	gpt.hdr_sz = 92;
+	gpt.curr_lba = 1;
+	gpt.backup_lba = dev.sect_cnt() - 1ULL;
+	gpt.first_part_lba = (GPT_SIZE + MBR_SIZE ) / SECTOR_SZ;
+	gpt.last_part_lba = dev.sect_cnt() - GPT_SIZE / SECTOR_SZ - 1;
+	gpt.part_arr_lba = 2;
+	gpt.part_cnt = 128;
+	gpt.part_sz = PART_SIZE;
 
-    std::string test2("hdd2.ext2");
-    readFs(test2);
+	gpt_part_t &part1 = *(gpt_part_t *)dev.get_sect(gpt.part_arr_lba);
+	part1.first_lba = gpt.first_part_lba;
+	part1.last_lba = gpt.last_part_lba;
+	memcpy(part1.type_guid, "rand1-------16b", 16);
+	memcpy(part1.uniq_guid, "rand2-------16b", 16);
+	memcpy(part1.name, u"OsBoot", 16);
 
-    std::string test("hdd.ext2");
-    readFs(test);
+	memcpy(dev.get_sect(gpt.backup_lba), dev.get_sect(gpt.curr_lba),
+			SECTOR_SZ);
+	memcpy(dev.get_sect(gpt.last_part_lba + 1), dev.get_sect(gpt.part_arr_lba),
+			gpt.part_cnt * gpt.part_sz);
 
-    //util::hexdump(abc, sizeof(abc));
-    return 0;
+	gpt_hdr_t &back_gpt = *(gpt_hdr_t *)dev.get_sect(dev.sect_cnt() - 1);
+	
+	back_gpt.curr_lba = gpt.backup_lba;
+	back_gpt.backup_lba = gpt.curr_lba;
+
+	gpt.part_crc = 0;
+	gpt.hdr_crc = 0;
+	back_gpt.hdr_crc = 0;
+
+	gpt.part_crc = crc32(dev.get_sect(gpt.part_arr_lba),
+			gpt.part_cnt * gpt.part_sz);
+	back_gpt.part_crc = gpt.part_crc;
+
+	gpt.hdr_crc = crc32(dev.get_sect(gpt.curr_lba), gpt.hdr_sz);
+	back_gpt.hdr_crc = crc32(dev.get_sect(back_gpt.curr_lba), back_gpt.hdr_sz);
+
+	printf("gpt: %s\n", gpt_str(gpt).c_str());
+	printf("back gpt: %s\n", gpt_str(back_gpt).c_str());
+	printf("parts: %s\n", 
+			part_arr_str(dev.get_sect(gpt.part_arr_lba),
+			gpt.part_cnt, gpt.part_sz).c_str());
 }
+/*
+	TO FIX:
+		- commit fcn
+		- add directory support
+		- lost+found ????
+		- check all
+*/
+void install_ext2(Dev &dev, DevLayout &layout) {
+	/* this depends on gpt but not on mbr */
+	gpt_hdr_t &gpt = *(gpt_hdr_t *)dev.get_sect(1);
+	gpt_part_t &part1 = *(gpt_part_t *)dev.get_sect(gpt.part_arr_lba);
+
+	Ext2 ext2(dev, gpt.first_part_lba,
+			gpt.last_part_lba - gpt.first_part_lba + 1);
+	ext2.create_fs();
+
+	printf("Create some usual dirs\n");
+	ext2.dirs.mkdir("/", "bin");
+	ext2.dirs.mkdir("/", "boot");
+	ext2.dirs.mkdir("/", "dev");
+	ext2.dirs.mkdir("/", "etc");
+	ext2.dirs.mkdir("/etc", "init.d");
+	ext2.dirs.mkdir("/etc", "net");
+
+	printf("Create boot file(inode 5)\n");
+	char boot[] = "Ana are mere multe aici";
+	if (ext2.inodes.write_imutable(5, boot, sizeof(boot))) {
+		printf("Can't create boot file\n");
+		return ;
+	}
+	int boot_ino = ext2.dirs.find_rec("/boot");
+	if (boot_ino < 1) {
+		printf("can't find boot inode\n");
+		return ;
+	}
+	if (ext2.dirs.add_file(boot_ino, 5, "boot.boot", EXT2_FT_DIR)) {
+		printf("Can't add boot.boot to boot inode\n");
+		return ;
+	}
+
+	printf("Hexdump boot:\n");
+	inode_t bootino;
+	if (ext2.inodes.getino(5, &bootino)) {
+		printf("Failed to get boot inode\n");
+		return ;
+	}
+	char bootbuf[bootino.size];
+	if (ext2.inodes.read(5, 0, bootbuf, sizeof(bootbuf)) != sizeof(bootbuf)) {
+		printf("Failed to read boot.boot\n");
+		return ;
+	}
+	printf("boot.boot[size: %lu]: \n", sizeof(bootbuf));
+	util::hexdump(bootbuf, sizeof(bootbuf));
+
+	/* TO DO:
+		- write real boot program here
+		- write kernel into /boot
+	 */
+
+	printf("Listing dirs\n");
+	ext2.dirs.listdir("/", [](auto& entry) {
+		printf("[%3d]/%s\n", entry.ino, entry.name);
+	});
+	ext2.dirs.listdir("/etc", [](auto& entry) {
+		printf("[%3d]/etc/%s\n", entry.ino, entry.name);
+	});
+	ext2.dirs.listdir("/boot", [](auto& entry) {
+		printf("[%3d]/boot/%s\n", entry.ino, entry.name);
+	});
+
+	ext2.commit_backups();
+	printf("Ext2: %s\n", ext2.to_string().c_str());
+}
+
+int main (int argc, char const *argv[]) try {
+	if (argc < 2) {
+		printf("Needs at least 1 argument: %s img_file [layout.json]\n",
+				argv[0]);
+		return -1;
+	}
+
+	DevLayout dev_layout(argc == 3 ? argv[2] : "dev_layout.json");
+	Dev dev(argv[1]);
+
+	if (dev.size() < TOT_SIZE) {
+		printf("specified img_file is to small, needs to be at least %d bytes\n",
+				TOT_SIZE);
+		return -1;
+	}
+
+	install_gpt(dev, dev_layout);
+	install_ext2(dev, dev_layout);
+	install_mbr(dev, dev_layout);
+	dev.save();
+
+	return 0;
+}
+catch (std::exception& ex) {
+	std::cout << "program terminated after: " << ex.what() << std::endl;
+}
+
+/*
+	boot-code 0-440 bytes and prot-mbr
+		-> zipped toghether in a single mbr sector
+	gpt-hdr and gpt-partitions(read from config and prob 1) place on disk
+		-> also place backup at end just because that crc wasn't enaugh
+	-> config file for all the boot extensions and their size(will be a
+			struct and a program to edit the struct)
+	zip in the filesystem
+		-> *
+	add into the filesystem the following:
+		-> important boot extensions - those will do all the job, set vesa, load
+				the second stage of the kernel, etc
+		-> second stage - will load the third stage from protected mode and
+				with the address sent from boot
+
+	After all this the new boot will look like so:
+		- the boot sector is loaded togheter with the prot-mbr and started
+		- this boot program will know where the config.boot part is
+		- he will load from that all the extensions named there in ram
+		- the boot sector will than also find the address(inode) of the 2 stages
+		- he will execute all boot extensions and after that start prot mode
+		- protected mode will transition to stage 2
+
+	This program basically formats the disk  
+*/
